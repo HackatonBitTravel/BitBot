@@ -1,4 +1,5 @@
-from langchain_community.embeddings import HuggingFaceEmbeddings
+#from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from huggingface_hub import hf_hub_download
 from dotenv import load_dotenv
@@ -43,14 +44,14 @@ print(f"Dossier : {folder_path}")
 # ✅ EMBEDDINGS LOCAUX (gratuit, illimité, rapide)
 # Le modèle se télécharge une seule fois (~80 MB) et tourne sur ton PC
 try:
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'},  # Utilise CPU (ou 'cuda' si GPU)
-        encode_kwargs={'normalize_embeddings': True}
+    # Utilisez le modèle 'text-embedding-004' qui est performant pour le RAG
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        # Votre clé API est lue automatiquement via le SDK
     )
-    print("Embeddings HuggingFace local chargés (gratuit, illimité)")
+    print("Embeddings Google chargés (légers, API)")
 except Exception as e:
-    print(f"Erreur initialisation embeddings : {e}")
+    print(f"Erreur initialisation embeddings Google : {e}")
     raise
 
 # Chargement du vectorstore FAISS
