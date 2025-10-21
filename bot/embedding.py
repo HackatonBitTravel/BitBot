@@ -1,4 +1,4 @@
-#from langchain_community.embeddings import HuggingFaceEmbeddings
+
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from huggingface_hub import hf_hub_download
@@ -41,13 +41,11 @@ except Exception as e:
 folder_path = faiss_index_path.replace("index.faiss", "")
 print(f"Dossier : {folder_path}")
 
-# ✅ EMBEDDINGS LOCAUX (gratuit, illimité, rapide)
-# Le modèle se télécharge une seule fois (~80 MB) et tourne sur ton PC
+
 try:
     # Utilisez le modèle 'text-embedding-004' qui est performant pour le RAG
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/text-embedding-004",
-        # Votre clé API est lue automatiquement via le SDK
     )
     print("Embeddings Google chargés (légers, API)")
 except Exception as e:
