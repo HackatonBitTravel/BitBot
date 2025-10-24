@@ -12,6 +12,13 @@ salutation_done = False
 # 🔍 Initialisation de l'outil de recherche web
 search_tool = DuckDuckGoSearchRun()
 
+# Instruction de formatage stricte (contraint le LLM à un bon Markdown)
+INSTRUCTION_FORMAT = """
+Respecte strictement les règles Markdown :
+1. Liste les étapes/points en allant systématiquement à la ligne (sauts de ligne).
+2. Utilise les numéros (1., 2., 3.) pour les étapes.
+3. Utilise toujours les doubles astérisques (**...**) pour le gras.
+"""
 
 def is_bitcoin_related(question: str) -> bool:
     """
@@ -74,6 +81,18 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
     if detected_lang is None:
         detected_lang = detect_language(input_text)
 
+    # 2. CRÉATION DE L'INSTRUCTION LINGUISTIQUE OBLIGATOIRE
+    if detected_lang == 'wo':
+        # Le modèle doit répondre en Wolof
+        instruction_langue = "Réponds en WOLOF. Ta réponse DOIT ÊTRE intégralement en Wolof. Si l'information manque, explique la limite en Wolof."
+    elif detected_lang == 'en':
+        # Le modèle doit répondre en Anglais (si la détection est fiable)
+        instruction_langue = "Réponds en ANGLAIS. Ta réponse DOIT ÊTRE intégralement en Anglais."
+    else:
+        # Français ou cas de repli
+        instruction_langue = "Réponds en FRANÇAIS. Ta réponse DOIT ÊTRE intégralement en Français."
+
+
     # 🔍 LOGIQUE DE RECHERCHE (identique à get_response)
     context_docs = ""
     
@@ -108,10 +127,10 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
 
     # Formater le prompt
     prompt_text = prompt.format(
-        input=input_text,
+        instruction_langue=instruction_langue,
+        instruction_format=INSTRUCTION_FORMAT,
         context=full_context,
-        detected_language=detected_lang,
-        session_history=conversation_context
+        input=input_text
     )
 
     # Streaming
@@ -125,3 +144,4 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
 
     session_history.append(f"[{detected_lang.upper()}] User: {input_text}")
     session_history.append(f"[{detected_lang.upper()}] BitBot: {answer_text}")
+
