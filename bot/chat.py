@@ -5,6 +5,7 @@ from bot.embedding import retriever
 from langchain_community.tools import DuckDuckGoSearchRun
 import re
 import time
+import asyncio
 
 session_history = []
 salutation_done = False
@@ -72,9 +73,10 @@ def is_bittravel_related(question: str) -> bool:
     return any(re.search(rf"\b{kw}\b", question_lower) for kw in bittravel_keywords)
 
 
-
-def stream_response_generator(input_text, detected_lang=None, max_history=12):
-    """Version streaming de la réponse"""
+async def stream_response_generator(input_text, detected_lang=None, max_history=12):
+    """
+    Version streaming ASYNCHRONE de la réponse avec format SSE
+    """
     global session_history
 
     # Détecter la langue si non précisée
@@ -83,23 +85,21 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
 
     # 2. CRÉATION DE L'INSTRUCTION LINGUISTIQUE OBLIGATOIRE
     if detected_lang == 'wo':
-        # Le modèle doit répondre en Wolof
         instruction_langue = "Réponds en WOLOF. Ta réponse DOIT ÊTRE intégralement en Wolof. Si l'information manque, explique la limite en Wolof."
     elif detected_lang == 'en':
-        # Le modèle doit répondre en Anglais (si la détection est fiable)
         instruction_langue = "Réponds en ANGLAIS. Ta réponse DOIT ÊTRE intégralement en Anglais."
     else:
-        # Français ou cas de repli
         instruction_langue = "Réponds en FRANÇAIS. Ta réponse DOIT ÊTRE intégralement en Français."
 
-
-    # 🔍 LOGIQUE DE RECHERCHE (identique à get_response)
+    # 🔍 LOGIQUE DE RECHERCHE
     context_docs = ""
     
     if is_bitcoin_related(input_text):
         print("🌐 [Stream] Question Bitcoin → Recherche WEB")
         try:
-            web_results = search_tool.run(input_text)
+            # Exécuter la recherche dans un thread séparé pour éviter le blocage
+            loop = asyncio.get_event_loop()
+            web_results = await loop.run_in_executor(None, search_tool.run, input_text)
             context_docs = f"[Web]\n{web_results[:3000]}"
             print("✅ Recherche web OK")
         except Exception as e:
@@ -109,7 +109,9 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
     elif is_bittravel_related(input_text):
         print("📚 [Stream] Question BitTravel → Recherche FAISS")
         try:
-            docs = retriever.invoke(input_text)
+            # Exécuter FAISS dans un thread séparé
+            loop = asyncio.get_event_loop()
+            docs = await loop.run_in_executor(None, retriever.invoke, input_text)
             if docs:
                 context_docs = "[FAISS]\n" + "\n\n".join([
                     doc.page_content for doc in docs[:3]
@@ -133,15 +135,110 @@ def stream_response_generator(input_text, detected_lang=None, max_history=12):
         input=input_text
     )
 
-    # Streaming
-    stream = llm.stream(prompt_text)
+    # Streaming avec format SSE
     answer_text = ""
     
-    for chunk in stream:
-        content = chunk.content
-        answer_text += content
-        yield content
+    try:
+        # Exécuter le stream du LLM dans un thread séparé
+        loop = asyncio.get_event_loop()
+        stream = await loop.run_in_executor(None, llm.stream, prompt_text)
+        
+        for chunk in stream:
+            content = chunk.content
+            if content:  # Ignorer les chunks vides
+                answer_text += content
+                # Format SSE : data: <content>\n\n
+                yield f"data: {content}\n\n"
+                # Petit délai pour éviter la surcharge
+                await asyncio.sleep(0.01)
+        
+        # Envoyer un signal de fin
+        yield "data: [DONE]\n\n"
+        
+    except Exception as e:
+        print(f"❌ Erreur lors du streaming : {e}")
+        yield f"data: Erreur: {str(e)}\n\n"
+        yield "data: [DONE]\n\n"
 
+    # Sauvegarder l'historique
     session_history.append(f"[{detected_lang.upper()}] User: {input_text}")
     session_history.append(f"[{detected_lang.upper()}] BitBot: {answer_text}")
 
+
+# Version alternative sans SSE (texte brut)
+async def stream_response_generator_plain(input_text, detected_lang=None, max_history=12):
+    """
+    Version streaming sans format SSE (texte brut uniquement)
+    Utilisez celle-ci si le client ne supporte pas SSE
+    """
+    global session_history
+
+    if detected_lang is None:
+        detected_lang = detect_language(input_text)
+
+    if detected_lang == 'wo':
+        instruction_langue = "Réponds en WOLOF. Ta réponse DOIT ÊTRE intégralement en Wolof. Si l'information manque, explique la limite en Wolof."
+    elif detected_lang == 'en':
+        instruction_langue = "Réponds en ANGLAIS. Ta réponse DOIT ÊTRE intégralement en Anglais."
+    else:
+        instruction_langue = "Réponds en FRANÇAIS. Ta réponse DOIT ÊTRE intégralement en Français."
+
+    context_docs = ""
+    
+    if is_bitcoin_related(input_text):
+        print("🌐 [Stream] Question Bitcoin → Recherche WEB")
+        try:
+            loop = asyncio.get_event_loop()
+            web_results = await loop.run_in_executor(None, search_tool.run, input_text)
+            context_docs = f"[Web]\n{web_results[:3000]}"
+            print("✅ Recherche web OK")
+        except Exception as e:
+            print(f"⚠️  Erreur web : {e}")
+            context_docs = ""
+    
+    elif is_bittravel_related(input_text):
+        print("📚 [Stream] Question BitTravel → Recherche FAISS")
+        try:
+            loop = asyncio.get_event_loop()
+            docs = await loop.run_in_executor(None, retriever.invoke, input_text)
+            if docs:
+                context_docs = "[FAISS]\n" + "\n\n".join([
+                    doc.page_content for doc in docs[:3]
+                ])
+                print(f"✅ {len(docs)} doc(s) trouvé(s)")
+            else:
+                context_docs = ""
+        except Exception as e:
+            print(f"⚠️  Erreur FAISS : {e}")
+            context_docs = ""
+
+    conversation_context = "\n".join(session_history[-max_history:])
+    full_context = f"{conversation_context}\n\n{context_docs}" if context_docs else conversation_context
+
+    prompt_text = prompt.format(
+        instruction_langue=instruction_langue,
+        instruction_format=INSTRUCTION_FORMAT,
+        context=full_context,
+        input=input_text
+    )
+
+    answer_text = ""
+    
+    try:
+        loop = asyncio.get_event_loop()
+        stream = await loop.run_in_executor(None, llm.stream, prompt_text)
+        
+        for chunk in stream:
+            content = chunk.content
+            if content:
+                answer_text += content
+                # Envoyer directement le texte sans format SSE
+                yield content
+                await asyncio.sleep(0.01)
+        
+    except Exception as e:
+        print(f"❌ Erreur lors du streaming : {e}")
+        yield f"\n\nErreur: {str(e)}"
+
+    session_history.append(f"[{detected_lang.upper()}] User: {input_text}")
+    session_history.append(f"[{detected_lang.upper()}] BitBot: {answer_text}")
