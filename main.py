@@ -18,7 +18,7 @@ def home():
 
 @app.get("/ping")
 async def ping():
-    return {"status": "BitBot actif !"}
+    return {"status": "OK", "message": "BitBot actif ✅"}
 
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
