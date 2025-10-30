@@ -2,54 +2,57 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from bot.chat import stream_response_generator, stream_response_generator_plain
+from bot.chat import stream_response_generator_plain, stream_response_generator_html_incremental
 
+# ------------------------------------------------------------
+# CONFIGURATION GLOBALE DE L'API
+# ------------------------------------------------------------
 app = FastAPI(
     title="BitBot API",
     description=(
-        "API de l'assistant conversationnel **BitBot** pour la plateforme **BitTravel**. "
-        "Cette API prend en charge les langues **française**, **wolof** et **anglaise**, "
-        "et permet d'interagir en temps réel avec un modèle d'IA (LLM) via le streaming."
+        "API du chatbot **BitBot**, assistant intelligent intégré à la plateforme **BitTravel**. "
+        "Elle permet d’interagir avec un modèle d’IA multilingue (Français, Wolof, Anglais) "
+        "en mode **streaming** pour une expérience de chat fluide et interactive."
     ),
     version="1.0.0"
 )
 
 # ------------------------------------------------------------
-# CORS CONFIGURATION
+# CONFIGURATION CORS
 # ------------------------------------------------------------
-# Autorise les requêtes cross-origin (nécessaire pour le frontend web ou mobile)
+# Permet les requêtes depuis d’autres origines (notamment le frontend web/mobile)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ⚠️ À restreindre en production (ex: ["https://bittravel.sn"])
+    allow_origins=["*"],  #  À restreindre en production (ex: ["https://bittravel.sn"])
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ------------------------------------------------------------
-# DATA MODELS
+# SCHEMAS DE DONNÉES
 # ------------------------------------------------------------
 class ChatRequest(BaseModel):
     """
-    Représente le format de la requête envoyée au chatbot.
+    Schéma du message utilisateur envoyé au chatbot.
 
     Attributes:
-        message (str): Le message ou la question saisie par l'utilisateur.
+        message (str): Le texte saisi par l'utilisateur (question ou instruction).
     """
     message: str
 
 
 # ------------------------------------------------------------
-# HOME ROUTE
+#ROUTE D'ACCUEIL
 # ------------------------------------------------------------
 @app.get("/", tags=["Root"])
 def home():
     """
-    **Page d’accueil de l’API BitBot**
+   **Page d’accueil de l’API BitBot**
 
-    Retourne un simple message de bienvenue indiquant que l’API fonctionne correctement.
+    Retourne un message simple confirmant que l’API est en ligne et prête à l’emploi.
 
-    **Retourne :**
+    **Exemple de réponse :**
     ```json
     {
         "message": "Bienvenue sur l'API BitBot ⚡ (mode streaming activé)"
@@ -67,10 +70,10 @@ async def ping():
     """
     **Vérifie l’état du serveur BitBot**
 
-    Cette route est utilisée pour vérifier que l’API est **en ligne et réactive**.
-    Utile pour les outils de monitoring (UptimeRobot, Render, etc.).
+    Cette route sert à vérifier que le serveur est **actif**.
+    Utilisée pour les systèmes de surveillance comme **UptimeRobot** ou **Render Health Checks**.
 
-    **Retourne :**
+    **Exemple de réponse :**
     ```json
     {
         "status": "BitBot actif !"
@@ -81,18 +84,19 @@ async def ping():
 
 
 # ------------------------------------------------------------
-# CHAT STREAM (SSE)
+# CHAT STREAM (HTML)
 # ------------------------------------------------------------
 @app.post("/chat", tags=["Chat"])
 async def chat_stream(req: ChatRequest):
     """
-    **Discussion avec BitBot (format SSE)**
+    **Discussion avec BitBot — Streaming HTML**
 
-    Cette route établit une **connexion en streaming** avec le modèle d'IA, 
-    en utilisant le format **Server-Sent Events (SSE)**.
+    Cet endpoint renvoie la réponse du chatbot **en continu** sous forme **HTML**.
+    Le rendu Markdown est directement converti côté **backend**.
 
-    Le serveur envoie la réponse **progressivement**, 
-    permettant une expérience de chat fluide et en temps réel.
+    **Utilisation recommandée :**
+    - Lorsque le frontend affiche déjà du contenu HTML (ex : `<div v-html="...">` en Vue.js)
+    - Permet une **mise en forme riche** directement côté serveur.
 
     **Entrée :**
     ```json
@@ -101,66 +105,67 @@ async def chat_stream(req: ChatRequest):
     }
     ```
 
-    **Sortie (flux SSE) :**
-    ```
-    data: BitTravel est une plateforme de réservation de tickets...
-    data: Elle prend en charge les paiements...
-    data: ...
+    **Sortie (texte HTML progressif) :**
+    ```html
+    <p><strong>BitTravel</strong> est une plateforme innovante...</p>
     ```
 
-    **Spécificités techniques :**
-    - Type : `POST`
-    - Format : `text/event-stream`
-    - Temps de connexion : 5 minutes max
-    - Support : Langues FR / WO / EN
+    **Détails techniques :**
+    - Méthode : `POST`
+    - Type : `text/html; charset=utf-8`
+    - Streaming temps réel (connexion persistante)
+    - Timeout : 5 minutes
 
     """
     try:
         return StreamingResponse(
-            stream_response_generator(req.message),
-            media_type="text/event-stream",
+            stream_response_generator_html_incremental(req.message),
+            media_type="text/html; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Désactive le buffering (utile sur Render/Nginx)
-                "Transfer-Encoding": "chunked"
+                "X-Accel-Buffering": "no"
             }
         )
     except Exception as e:
-        print(f"Erreur lors de la préparation du stream: {e}")
+        print(f" Erreur lors de la préparation du stream: {e}")
         return {"error": f"Une erreur interne s'est produite : {str(e)}"}
 
 
 # ------------------------------------------------------------
-# CHAT STREAM (TEXTE BRUT)
+#  CHAT STREAM (MARKDOWN)
 # ------------------------------------------------------------
-@app.post("/chat/plain", tags=["Chat"])
-async def chat_stream_plain(req: ChatRequest):
+@app.post("/chat/markdown", tags=["Chat"])
+async def chat_stream_markdown(req: ChatRequest):
     """
-    **Discussion avec BitBot (texte brut)**
+     **Discussion avec BitBot — Streaming Markdown**
 
-    Variante simplifiée de `/chat` qui renvoie la réponse 
-    du modèle en **texte brut (plain text)** au lieu du format SSE.
+    Cet endpoint renvoie la réponse du chatbot **en texte brut Markdown**,
+    sans conversion côté serveur.  
+    Le frontend (par ex. Vue.js, React, Flutter) peut ensuite gérer le rendu
+    avec une librairie comme **marked.parse()** ou **react-markdown**.
 
-    Idéale pour les tests avec **cURL**, **Postman** ou des scripts simples.
+    **Utilisation recommandée :**
+    - Pour les applications frontends modernes qui gèrent déjà le Markdown.
+    - Permet un **contrôle complet du rendu visuel côté client.**
 
-    **Exemple :**
-    ```bash
-    curl -X POST http://localhost:8000/chat/plain \
-         -H "Content-Type: application/json" \
-         -d '{"message": "Qui a créé Bitcoin ?"}'
+    **Entrée :**
+    ```json
+    {
+        "message": "Comment payer un billet avec Bitcoin ?"
+    }
     ```
 
-    **Sortie :**
+    **Sortie (Markdown brut) :**
     ```
-    Bitcoin a été créé en 2009 par une personne (ou un groupe) sous le pseudonyme Satoshi Nakamoto.
+    **BitTravel** accepte les paiements en **Bitcoin** via le **Lightning Network** ⚡.
     ```
 
-    **Spécificités techniques :**
-    - Type : `POST`
-    - Format : `text/plain; charset=utf-8`
-    - Support : Langues FR / WO / EN
-    - Recommandé pour les intégrations simples ou les tests manuels
+    **Détails techniques :**
+    - Méthode : `POST`
+    - Type : `text/plain; charset=utf-8`
+    - Streaming temps réel
+    - Timeout : 5 minutes
     """
     try:
         return StreamingResponse(
@@ -178,14 +183,14 @@ async def chat_stream_plain(req: ChatRequest):
 
 
 # ------------------------------------------------------------
-# RUN SERVER (développement local)
+#LANCEMENT DU SERVEUR (développement local)
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
+        "main:app", 
+        host="0.0.0.0", 
         port=8000,
-        timeout_keep_alive=300,  # Timeout de 5 min pour le streaming
+        timeout_keep_alive=300,  # Timeout de 5 minutes pour le streaming
         log_level="info"
     )
